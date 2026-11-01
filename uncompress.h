@@ -23,3 +23,12 @@
 
 uint8 *uncompress(FILE *f, uint8 compressionMethod, uint32 inSize, uint32 outSize);
 
+// Same decompressors, but the uncompressed bytes are written into a
+// caller-provided buffer ('outData', at least 'outSize' bytes) instead of a
+// fresh safe_malloc() block. Nothing may be allocated: this is the streaming
+// form used to decode resources straight out of the resource file (SCR
+// backgrounds: the uncompressed blob is the surface bitmap itself, so a
+// in-place decode makes the 112-153 KB blob never exist in RAM).
+void uncompressIntoBuf(FILE *f, uint8 compressionMethod, uint32 inSize,
+                       uint32 outSize, uint8 *outData);
+

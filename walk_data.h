@@ -1,9 +1,8 @@
 
 #define NUM_OF_NODES 6
 
-// walkData[]: these data aren't contained in RESOURCE.001,
-// but in the original SCRANTIC.SCR
-// See extract_walk_data.c for the detail
+// walkData[]: walk path data extracted from SCRANTIC.SCR.
+// See extract_walk_data.c for details.
 
 static uint16 walkData[][4] = {
     { 1, 306, 238, 19 },  // A to E

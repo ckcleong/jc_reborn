@@ -1,0 +1,11 @@
+# 16 MB flash: factory app + a read-only FATFS partition for the
+# resource files (RESOURCE.001 1.17 MB, RESOURCE.MAP, WAVs). The FAT
+# partition is deliberately large so the shipped resource set plus
+# future (audio, pilot) files fit without layout churn.
+#
+# Name,      Type, SubType, Offset,   Size
+nvs,         data, nvs,     0x9000,   0x4000
+phy_init,    data, phy,     0xd000,   0x1000
+otadata,     data, ota,     0xe000,   0x2000
+app,         app,  factory, 0x10000,  3M
+resources,   data, fat,     0x310000, 8M

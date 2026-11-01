@@ -29,7 +29,8 @@
 
 #include "mytypes.h"
 #include "resource.h"
-#include "utils.h"   // TODO
+#include "resmgr.h"
+#include "utils.h"
 
 #define MAX_FILENAME_LEN 2048
 
@@ -122,7 +123,7 @@ static void dumpBmp(struct TBmpResource *bmpResource, struct TPalResource *palRe
                                     palResource->colors[i].g << 2,
                                     palResource->colors[i].b << 2);
 
-        for (int y=0; y < height; y++) {  // TODO
+        for (int y=0; y < height; y++) {
 
             fputs ("\"", fout);
 
@@ -177,7 +178,7 @@ static void dumpScr(struct TScrResource *scrResource, struct TPalResource *palRe
 
     data = scrResource->uncompressedData;
 
-    for (int y=0; y < height; y++) {  // TODO
+    for (int y=0; y < height; y++) {
         fputs ("\"", fout);
         for (int x=0; x < (width/2); x++) {
             fprintf(fout, "%02x", data[0]);
@@ -496,16 +497,36 @@ void dumpAllResources()
 {
     createDumpDirs();
 
-    for (int i = 0; i < numScrResources; i++)
+    // All dumps walk through the uncompressed data of the resources,
+    // which is only resident on demand: acquire each resource right
+    // before dumping it, release right after.
+
+    for (int i = 0; i < numScrResources; i++) {
+        struct TResIndexEntry *idxEntry = resmgrFindByResource(scrResources[i]);
+        resmgrAcquireData(idxEntry);
         dumpScr(scrResources[i], palResources[0]);
+        resmgrReleaseData(idxEntry);
+    }
 
-    for (int i = 0; i < numBmpResources; i++)
+    for (int i = 0; i < numBmpResources; i++) {
+        struct TResIndexEntry *idxEntry = resmgrFindByResource(bmpResources[i]);
+        resmgrAcquireData(idxEntry);
         dumpBmp(bmpResources[i], palResources[0]);
+        resmgrReleaseData(idxEntry);
+    }
 
-    for (int i = 0; i < numAdsResources; i++)
+    for (int i = 0; i < numAdsResources; i++) {
+        struct TResIndexEntry *idxEntry = resmgrFindByResource(adsResources[i]);
+        resmgrAcquireData(idxEntry);
         dumpAds(adsResources[i]);
+        resmgrReleaseData(idxEntry);
+    }
 
-    for (int i = 0; i < numTtmResources; i++)
+    for (int i = 0; i < numTtmResources; i++) {
+        struct TResIndexEntry *idxEntry = resmgrFindByResource(ttmResources[i]);
+        resmgrAcquireData(idxEntry);
         dumpTtm(ttmResources[i]);
+        resmgrReleaseData(idxEntry);
+    }
 }
 

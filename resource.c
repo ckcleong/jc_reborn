@@ -28,6 +28,7 @@
 #include "mytypes.h"
 #include "utils.h"
 #include "resource.h"
+#include "resmgr.h"
 #include "uncompress.h"
 
 #define MAX_ADS_RESOURCES 100
@@ -48,10 +49,27 @@ int numPalResources = 0;
 int numScrResources = 0;
 int numTtmResources = 0;
 
-static struct TMapFile mapFile;
+
+//=====================================
+//     Resource parsers
+//
+// Each parser is split in two stages:
+//
+//   - parseXxxHeader() reads every field of the resource header with the
+//     exception of the compressed data blob, which is simply skipped over
+//     with an fseek(). It records in *blobOffset the absolute position of
+//     the blob, which resLoadData() will need later. uncompressedData is
+//     left NULL at that stage.
+//
+//   - loadXxxData() jumps to the position of the blob and decompresses it.
+//     Note that the decompressor reads / writes / decompresses directly
+//     from the FILE stream, so the compressed data never needs to be in
+//     memory.
+//
+//=====================================
 
 
-static struct TAdsResource *parseAdsResource(FILE *f)
+static struct TAdsResource *parseAdsHeader(FILE *f, uint32 *blobOffset)
 {
     struct TAdsResource *adsResource;
     uint8 *buffer;
@@ -63,7 +81,7 @@ static struct TAdsResource *parseAdsResource(FILE *f)
     if (memcmp(buffer,"VER:",4))
         fatalError("'VER:' string not found while parsing ADS resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     adsResource->versionSize = readUint32(f);
     adsResource->versionString = readUint8Block(f,5);
@@ -72,7 +90,7 @@ static struct TAdsResource *parseAdsResource(FILE *f)
     if (memcmp(buffer,"ADS:",4))
         fatalError("'ADS:' string not found while parsing ADS resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     adsResource->adsUnknown1 = readUint8(f);
     adsResource->adsUnknown2 = readUint8(f);
@@ -83,7 +101,7 @@ static struct TAdsResource *parseAdsResource(FILE *f)
     if (memcmp(buffer,"RES:",4))
         fatalError("'RES:' string not found while parsing ADS resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     adsResource->resSize = readUint32(f);
     adsResource->numRes = readUint16(f);
@@ -99,23 +117,22 @@ static struct TAdsResource *parseAdsResource(FILE *f)
     if (memcmp(buffer,"SCR:",4))
         fatalError("'SCR:' string not found while parsing ADS resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     adsResource->compressedSize = readUint32(f) - 5;
     adsResource->compressionMethod = readUint8(f);
     adsResource->uncompressedSize = readUint32(f);
 
-    adsResource->uncompressedData = uncompress(f,
-                                      adsResource->compressionMethod,
-                                      adsResource->compressedSize,
-                                      adsResource->uncompressedSize
-                                    );
+    // skip over the compressed data, the TAG: section comes next
+    *blobOffset = (uint32) ftell(f);
+    fseek(f, adsResource->compressedSize, SEEK_CUR);
+    adsResource->uncompressedData = NULL;
 
     buffer = readUint8Block(f,4);
     if (memcmp(buffer,"TAG:",4))
         fatalError("'TAG:' string not found while parsing ADS resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     adsResource->tagSize = readUint32(f);
     adsResource->numTags = readUint16(f);
@@ -131,7 +148,19 @@ static struct TAdsResource *parseAdsResource(FILE *f)
 }
 
 
-static struct TBmpResource *parseBmpResource(FILE *f)
+static void loadAdsData(FILE *f, struct TAdsResource *adsResource, uint32 blobOffset)
+{
+    fseek(f, blobOffset, SEEK_SET);
+
+    adsResource->uncompressedData = uncompress(f,
+                                      adsResource->compressionMethod,
+                                      adsResource->compressedSize,
+                                      adsResource->uncompressedSize
+                                    );
+}
+
+
+static struct TBmpResource *parseBmpHeader(FILE *f, uint32 *blobOffset)
 {
     struct TBmpResource *bmpResource;
     uint8 *buffer;
@@ -143,7 +172,7 @@ static struct TBmpResource *parseBmpResource(FILE *f)
     if (memcmp(buffer,"BMP:",4))
         fatalError("'BMP:' string not found while parsing BMP resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     bmpResource->width = readUint16(f);
     bmpResource->height = readUint16(f);
@@ -152,7 +181,7 @@ static struct TBmpResource *parseBmpResource(FILE *f)
     if (memcmp(buffer,"INF:",4))
         fatalError("'INF:' string not found while parsing BMP resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     bmpResource->dataSize = readUint32(f);
     bmpResource->numImages = readUint16(f);
@@ -164,19 +193,30 @@ static struct TBmpResource *parseBmpResource(FILE *f)
     if (memcmp(buffer,"BIN:",4))
         fatalError("'BIN:' string not found while parsing BMP resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     bmpResource->compressedSize = readUint32(f) - 5; // discard size of compressionmethod+uncompressedsize
     bmpResource->compressionMethod = readUint8(f);
     bmpResource->uncompressedSize = readUint32(f);
+
+    // no further field follows the blob
+    *blobOffset = (uint32) ftell(f);
+    fseek(f, bmpResource->compressedSize, SEEK_CUR);
+    bmpResource->uncompressedData = NULL;
+
+    return bmpResource;
+}
+
+
+static void loadBmpData(FILE *f, struct TBmpResource *bmpResource, uint32 blobOffset)
+{
+    fseek(f, blobOffset, SEEK_SET);
 
     bmpResource->uncompressedData = uncompress(f,
                                       bmpResource->compressionMethod,
                                       bmpResource->compressedSize,
                                       bmpResource->uncompressedSize
                                     );
-
-    return bmpResource;
 }
 
 
@@ -192,7 +232,7 @@ static struct TPalResource *parsePalResource(FILE *f)
     if (memcmp(buffer,"PAL:",4))
         fatalError("'PAL:' string not found while parsing PAL resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     palResource->size = readUint16(f);
     palResource->unknown1 = readUint8(f);
@@ -202,7 +242,7 @@ static struct TPalResource *parsePalResource(FILE *f)
     if (memcmp(buffer,"VGA:",4))
         fatalError("'VGA:' string not found while parsing PAL resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     readUint8(f);   // size ?
     readUint8(f);
@@ -219,7 +259,7 @@ static struct TPalResource *parsePalResource(FILE *f)
 }
 
 
-static struct TScrResource *parseScrResource(FILE *f)
+static struct TScrResource *parseScrHeader(FILE *f, uint32 *blobOffset)
 {
     struct TScrResource *scrResource;
     uint8 *buffer;
@@ -231,7 +271,7 @@ static struct TScrResource *parseScrResource(FILE *f)
     if (memcmp(buffer,"SCR:",4))
         fatalError("'SCR:' string not found while parsing SCR resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     scrResource->totalSize = readUint16(f);
     scrResource->flags = readUint16(f);
@@ -240,7 +280,7 @@ static struct TScrResource *parseScrResource(FILE *f)
     if (memcmp(buffer,"DIM:",4))
         fatalError("'DIM:' string not found while parsing SCR resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     scrResource->dimSize = readUint32(f);
     scrResource->width = readUint16(f);
@@ -250,23 +290,34 @@ static struct TScrResource *parseScrResource(FILE *f)
     if (memcmp(buffer,"BIN:",4))
         fatalError("'BIN:' string not found while parsing SCR resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     scrResource->compressedSize = readUint32(f) - 5; // discard size of compressionmethod+uncompressedsize
     scrResource->compressionMethod = readUint8(f);
     scrResource->uncompressedSize = readUint32(f) ;
+
+    // no further field follows the blob
+    *blobOffset = (uint32) ftell(f);
+    fseek(f, scrResource->compressedSize, SEEK_CUR);
+    scrResource->uncompressedData = NULL;
+
+    return scrResource;
+}
+
+
+static void loadScrData(FILE *f, struct TScrResource *scrResource, uint32 blobOffset)
+{
+    fseek(f, blobOffset, SEEK_SET);
 
     scrResource->uncompressedData = uncompress(f,
                                       scrResource->compressionMethod,
                                       scrResource->compressedSize,
                                       scrResource->uncompressedSize
                                     );
-
-    return scrResource;
 }
 
 
-static struct TTtmResource *parseTtmResource(FILE *f)
+static struct TTtmResource *parseTtmHeader(FILE *f, uint32 *blobOffset)
 {
     struct TTtmResource *ttmResource;
     uint8 *buffer;
@@ -277,7 +328,7 @@ static struct TTtmResource *parseTtmResource(FILE *f)
     if (memcmp(buffer,"VER:",4))
         fatalError("'VER:' string not found while parsing TTM resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     ttmResource->versionSize = readUint32(f);
     ttmResource->versionString = readUint8Block(f,5);
@@ -286,7 +337,7 @@ static struct TTtmResource *parseTtmResource(FILE *f)
     if (memcmp(buffer,"PAG:",4))
         fatalError("'PAG:' string not found while parsing TTM resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     ttmResource->numPages = readUint32(f);
     ttmResource->pagUnknown1 = readUint8(f);
@@ -296,23 +347,22 @@ static struct TTtmResource *parseTtmResource(FILE *f)
     if (memcmp(buffer,"TT3:",4))
         fatalError("'TT3:' string not found while parsing TTM resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     ttmResource->compressedSize = readUint32(f) - 5; // discard size of compressionmethod+uncompressedsize
     ttmResource->compressionMethod = readUint8(f);
     ttmResource->uncompressedSize = readUint32(f);
 
-    ttmResource->uncompressedData = uncompress(f,
-                                      ttmResource->compressionMethod,
-                                      ttmResource->compressedSize,
-                                      ttmResource->uncompressedSize
-                                    );
+    // skip over the compressed data, the TTI: / TAG: sections come next
+    *blobOffset = (uint32) ftell(f);
+    fseek(f, ttmResource->compressedSize, SEEK_CUR);
+    ttmResource->uncompressedData = NULL;
 
     buffer = readUint8Block(f,4);
     if (memcmp(buffer,"TTI:",4))
         fatalError("'TTI:' string not found while parsing TTM resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     ttmResource->ttiUnknown1 = readUint8(f);
     ttmResource->ttiUnknown2 = readUint8(f);
@@ -323,7 +373,7 @@ static struct TTtmResource *parseTtmResource(FILE *f)
     if (memcmp(buffer,"TAG:",4))
         fatalError("'TAG:' string not found while parsing TTM resource");
 
-    free(buffer);
+    safe_free(buffer);
 
     ttmResource->tagSize = readUint32(f);
     ttmResource->numTags = readUint16(f);
@@ -339,170 +389,162 @@ static struct TTtmResource *parseTtmResource(FILE *f)
 }
 
 
-static void parseMapFile(char *fileName)
+static void loadTtmData(FILE *f, struct TTtmResource *ttmResource, uint32 blobOffset)
 {
-    FILE *f_map; // , *f_res;  // TODO
+    fseek(f, blobOffset, SEEK_SET);
 
-    f_map = fopen(fileName,"rb");
-
-    if (f_map == NULL)
-        fatalError("Resources map file not found: %s\n", fileName);
-
-    mapFile.unknown1 = readUint8(f_map);   // first 5 uint8s unknown
-    mapFile.unknown2 = readUint8(f_map);
-    mapFile.unknown3 = readUint8(f_map);
-    mapFile.unknown4 = readUint8(f_map);   // ? number of resources files available in this index
-    mapFile.unknown5 = readUint8(f_map);
-    mapFile.unknown6 = readUint8(f_map);
-
-    mapFile.resFileName = (char *) getString(f_map,13);
-
-    mapFile.numEntries = readUint16(f_map);
-
-    mapFile.Entries = safe_malloc(mapFile.numEntries * sizeof(struct TMapFileEntry));
-
-    for (int i=0; i<mapFile.numEntries; i++) {
-        mapFile.Entries[i].length = readUint32(f_map);
-        mapFile.Entries[i].offset = readUint32(f_map);
-    }
-
-    fclose(f_map);
+    ttmResource->uncompressedData = uncompress(f,
+                                      ttmResource->compressionMethod,
+                                      ttmResource->compressedSize,
+                                      ttmResource->uncompressedSize
+                                    );
 }
 
 
-static void parseResourceFile(char * filename)
+//=====================
+//     Dispatchers used by the resource manager
+//=====================
+
+
+void *resParseHeader(FILE *f, int resType, uint32 *blobOffset)
 {
-    FILE *f;
+    switch (resType) {
 
-    f = fopen(mapFile.resFileName,"rb");
-
-    if (f == NULL)
-        fatalError("Main resources file not found: %s\n", mapFile.resFileName);
-
-    if (debugMode) {
-        printf("Loading resources ");
-        fflush (stdout);
+        case RES_TYPE_ADS: return parseAdsHeader(f, blobOffset);
+        case RES_TYPE_BMP: return parseBmpHeader(f, blobOffset);
+        case RES_TYPE_PAL: *blobOffset = 0; return parsePalResource(f);
+        case RES_TYPE_SCR: return parseScrHeader(f, blobOffset);
+        case RES_TYPE_TTM: return parseTtmHeader(f, blobOffset);
     }
 
-    for (int i=0; i < mapFile.numEntries; i++) {
-
-        fseek(f, mapFile.Entries[i].offset, SEEK_SET);
-
-        mapFile.Entries[i].resName = (char *) readUint8Block(f,13);
-        mapFile.Entries[i].resSize = readUint32(f);
-
-        char *resName = mapFile.Entries[i].resName;
-        char *resType = resName + strlen(resName) - 4;  // get the extension .BMP .ADS etc.
-
-        if (debugMode) {
-             putchar('.');
-             fflush(stdout);
-        }
-
-        if (!strcmp(resType, ".ADS")) {
-            adsResources[numAdsResources] = parseAdsResource(f);
-            adsResources[numAdsResources]->resName = resName;
-            numAdsResources++;
-        }
-        else if (!strcmp(resType, ".BMP")) {
-            bmpResources[numBmpResources] = parseBmpResource(f);
-            bmpResources[numBmpResources]->resName = resName;
-            numBmpResources++;
-        }
-        else if (!strcmp(resType, ".PAL")) {
-            palResources[numPalResources] = parsePalResource(f);
-            palResources[numPalResources]->resName = resName;
-            numPalResources++;
-        }
-        else if (!strcmp(resType, ".SCR")) {
-            scrResources[numScrResources] = parseScrResource(f);
-            scrResources[numScrResources]->resName = resName;
-            numScrResources++;
-        }
-        else if (!strcmp(resType, ".TTM")) {
-            ttmResources[numTtmResources] = parseTtmResource(f);
-            ttmResources[numTtmResources]->resName = resName;
-            numTtmResources++;
-        }
-        // Note: there is one .VIN type file too (FILES.VIN)
-        // We dont process it since it's nothing else than a list
-        // of files, which we dont need
-    }
-
-    fclose(f);
-
-    if (debugMode)
-        putchar('\n');
+    fatalError("resParseHeader(): unknown resource type %d\n", resType);
+    return NULL;
 }
 
 
-void parseResourceFiles(char * filename)
+void resLoadData(FILE *f, int resType, void *resource, uint32 blobOffset)
 {
-    parseMapFile(filename);
-    parseResourceFile(filename);
+    switch (resType) {
+
+        case RES_TYPE_ADS: loadAdsData(f, (struct TAdsResource *) resource, blobOffset); return;
+        case RES_TYPE_BMP: loadBmpData(f, (struct TBmpResource *) resource, blobOffset); return;
+        case RES_TYPE_PAL: return;   // the whole palette resource is its own header
+        case RES_TYPE_SCR: loadScrData(f, (struct TScrResource *) resource, blobOffset); return;
+        case RES_TYPE_TTM: loadTtmData(f, (struct TTtmResource *) resource, blobOffset); return;
+    }
+
+    fatalError("resLoadData(): unknown resource type %d\n", resType);
 }
+
+
+void resDataSizes(void *resource, int resType, size_t *compressed, size_t *uncompressed)
+{
+    *compressed = 0;
+    *uncompressed = 0;
+
+    switch (resType) {
+
+        case RES_TYPE_ADS:
+            *compressed   = ((struct TAdsResource *) resource)->compressedSize;
+            *uncompressed = ((struct TAdsResource *) resource)->uncompressedSize;
+            break;
+
+        case RES_TYPE_BMP:
+            *compressed   = ((struct TBmpResource *) resource)->compressedSize;
+            *uncompressed = ((struct TBmpResource *) resource)->uncompressedSize;
+            break;
+
+        case RES_TYPE_PAL:
+            *uncompressed = ((struct TPalResource *) resource)->size;
+            break;
+
+        case RES_TYPE_SCR:
+            *compressed   = ((struct TScrResource *) resource)->compressedSize;
+            *uncompressed = ((struct TScrResource *) resource)->uncompressedSize;
+            break;
+
+        case RES_TYPE_TTM:
+            *compressed   = ((struct TTtmResource *) resource)->compressedSize;
+            *uncompressed = ((struct TTtmResource *) resource)->uncompressedSize;
+            break;
+    }
+}
+
+
+void resReleaseUncompressed(void *resource, int resType)
+{
+    switch (resType) {
+
+        case RES_TYPE_ADS:
+            safe_free(((struct TAdsResource *) resource)->uncompressedData);
+            ((struct TAdsResource *) resource)->uncompressedData = NULL;
+            break;
+
+        case RES_TYPE_BMP:
+            safe_free(((struct TBmpResource *) resource)->uncompressedData);
+            ((struct TBmpResource *) resource)->uncompressedData = NULL;
+            break;
+
+        case RES_TYPE_PAL:      // nothing to release, the struct IS the data
+            break;
+
+        case RES_TYPE_SCR:
+            safe_free(((struct TScrResource *) resource)->uncompressedData);
+            ((struct TScrResource *) resource)->uncompressedData = NULL;
+            break;
+
+        case RES_TYPE_TTM:
+            safe_free(((struct TTtmResource *) resource)->uncompressedData);
+            ((struct TTtmResource *) resource)->uncompressedData = NULL;
+            break;
+    }
+}
+
+
+//=====================
+//     Resource lookups
+//=====================
 
 
 struct TAdsResource *findAdsResource(char *searchString)
 {
-    struct TAdsResource *result = NULL;
+    struct TResIndexEntry *idxEntry = resmgrFind(searchString);
 
-    for (int i=0; i < numAdsResources && result == NULL; i++) {
-        if (!strcmp(adsResources[i]->resName, searchString))
-            result = adsResources[i];
-    }
-
-    if (result == NULL)
+    if (idxEntry == NULL || idxEntry->resType != RES_TYPE_ADS || idxEntry->resource == NULL)
         fatalError("ADS resource %s not found.", searchString);
 
-    return result;
+    return (struct TAdsResource *) idxEntry->resource;
 }
 
 
 struct TBmpResource *findBmpResource(char *searchString)
 {
-    struct TBmpResource *result = NULL;
+    struct TResIndexEntry *idxEntry = resmgrFind(searchString);
 
-    for (int i=0; i < numBmpResources && result == NULL; i++) {
-        if (!strcmp(bmpResources[i]->resName, searchString))
-            result = bmpResources[i];
-    }
-
-    if (result == NULL)
+    if (idxEntry == NULL || idxEntry->resType != RES_TYPE_BMP || idxEntry->resource == NULL)
         fatalError("BMP resource %s not found.", searchString);
 
-    return result;
+    return (struct TBmpResource *) idxEntry->resource;
 }
 
 
 struct TScrResource *findScrResource(char *searchString)
 {
-    struct TScrResource *result = NULL;
+    struct TResIndexEntry *idxEntry = resmgrFind(searchString);
 
-    for (int i=0; i < numScrResources && result == NULL; i++) {
-        if (!strcmp(scrResources[i]->resName, searchString))
-            result = scrResources[i];
-    }
-
-    if (result == NULL)
+    if (idxEntry == NULL || idxEntry->resType != RES_TYPE_SCR || idxEntry->resource == NULL)
         fatalError("SCR resource %s not found.", searchString);
 
-    return result;
+    return (struct TScrResource *) idxEntry->resource;
 }
 
 
 struct TTtmResource *findTtmResource(char *searchString)
 {
-    struct TTtmResource *result = NULL;
+    struct TResIndexEntry *idxEntry = resmgrFind(searchString);
 
-    for (int i=0; i < numTtmResources && result == NULL; i++) {
-        if (!strcmp(ttmResources[i]->resName, searchString))
-            result = ttmResources[i];
-    }
-
-    if (result == NULL)
+    if (idxEntry == NULL || idxEntry->resType != RES_TYPE_TTM || idxEntry->resource == NULL)
         fatalError("TTM resource %s not found.", searchString);
 
-    return result;
+    return (struct TTtmResource *) idxEntry->resource;
 }
-

@@ -26,10 +26,12 @@
 #include <stdarg.h>
 
 extern int debugMode;
+extern int memTracking;   // runtime flag: set via the 'memstats' argument
 
 void   fatalError(char *message, ... );
 void   debugMsg(char *message, ... );
 void   *safe_malloc(size_t size);
+void    safe_free(void *ptr);
 FILE   *safe_fopen(const char *pathname, const char *mode);
 uint8  readUint8(FILE *f);
 uint16 readUint16(FILE *f);
@@ -43,4 +45,16 @@ void   hexdump(uint8 *data, uint32 len);
 int    getDayOfYear();
 int    getHour();
 char   *getMonthAndDay();
+
+//-----
+//   Memory instrumentation (-DMEMTRACK compile flag, 'memstats' runtime flag)
+//-----
+
+void   memTrackLogf(char *message, ... );
+void   memTrackCheckpoint(char *tag);
+void   memTrackReport(char *tag);
+void   memTrackRunReport(void);
+void   memTrackLogResource(char *resName, size_t compressed, size_t uncompressed);
+void   memTrackExternalAdd(size_t bytes);
+void   memTrackExternalRemove(size_t bytes);
 

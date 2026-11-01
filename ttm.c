@@ -27,6 +27,7 @@
 #include "utils.h"
 #include "resource.h"
 #include "graphics.h"
+#include "resmgr.h"
 #include "sound.h"
 #include "ttm.h"
 
@@ -69,16 +70,36 @@ uint32 ttmFindTag(struct TTtmSlot *ttmSlot, uint16 reqdTag)
 }
 
 
-void ttmLoadTtm(struct TTtmSlot *ttmSlot, char *ttmName)     // TODO
+void ttmLoadTtm(struct TTtmSlot *ttmSlot, char *ttmName)
 {
-    struct TTtmResource *ttmResource = findTtmResource(ttmName);
+    // Make the TTM's data resident and hand ownership to the slot, which
+    // releases it in ttmResetSlot(). If the slot already holds another
+    // TTM's data, defer the release of the old data until the reset.
+    if (ttmSlot->resIdxEntry != NULL) {
+        if (ttmSlot->resIdxEntryOld != NULL)
+            resmgrReleaseData(ttmSlot->resIdxEntryOld);
+        ttmSlot->resIdxEntryOld = ttmSlot->resIdxEntry;
+    }
+
+    struct TResIndexEntry *idxEntry = resmgrAcquireNamed(ttmName);
+
+    if (idxEntry == NULL)
+        fatalError("TTM resource %s not found.", ttmName);
+
+    struct TTtmResource *ttmResource = (struct TTtmResource *) idxEntry->resource;
 
     debugMsg("---- Loading %s", ttmResource->resName);
 
-    ttmSlot->data     = ttmResource->uncompressedData;
-    ttmSlot->dataSize = ttmResource->uncompressedSize;
-    ttmSlot->numTags  = ttmResource->numTags;
-    ttmSlot->tags     = safe_malloc(ttmSlot->numTags * sizeof(struct TTtmTag));
+    memTrackLogf("ttmLoadTtm(%s): uncompressed=%zu tags=%u",
+                 ttmResource->resName,
+                 (size_t) ttmResource->uncompressedSize,
+                 (unsigned) ttmResource->numTags);
+
+    ttmSlot->data      = ttmResource->uncompressedData;
+    ttmSlot->dataSize  = ttmResource->uncompressedSize;
+    ttmSlot->numTags   = ttmResource->numTags;
+    ttmSlot->resIdxEntry = idxEntry;
+    ttmSlot->tags      = safe_malloc(ttmSlot->numTags * sizeof(struct TTtmTag));
 
     // we have to bookmark every tag for later jumps
     uint32 offset=0;
@@ -121,6 +142,9 @@ void ttmInitSlot(struct TTtmSlot *ttmSlot)
         ttmSlot->data          = NULL;
         ttmSlot->numSprites[i] = 0;
     }
+
+    ttmSlot->resIdxEntry    = NULL;
+    ttmSlot->resIdxEntryOld = NULL;
 }
 
 
@@ -128,7 +152,15 @@ void ttmResetSlot(struct TTtmSlot *ttmSlot)
 {
     if (ttmSlot->data != NULL) {
         ttmSlot->data = NULL;
-        free(ttmSlot->tags);
+        safe_free(ttmSlot->tags);
+
+        // The TTM data was *our* responsibility (ttmLoadTtm acquired it
+        // for us): release it back to the resource manager.
+        resmgrReleaseData(ttmSlot->resIdxEntry);
+        ttmSlot->resIdxEntry = NULL;
+
+        resmgrReleaseData(ttmSlot->resIdxEntryOld);
+        ttmSlot->resIdxEntryOld = NULL;
     }
 
     for (int i=0; i < MAX_BMP_SLOTS; i++) {
@@ -138,7 +170,7 @@ void ttmResetSlot(struct TTtmSlot *ttmSlot)
 }
 
 
-void ttmPlay(struct TTtmThread *ttmThread)     // TODO
+void ttmPlay(struct TTtmThread *ttmThread)
 {
     uint8 *data;
     uint32 offset;

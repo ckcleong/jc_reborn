@@ -1,8 +1,32 @@
 # Johnny Reborn
 
-Johnny Reborn is an open source engine for the classic Johnny Castaway screen saver, developed by Dynamix for Windows 3.x and published by Sierra, back in 1992.
+Johnny Reborn is an open source engine for the classic Johnny Castaway
+screensaver, developed by Dynamix for Windows 3.x and published by Sierra
+in 1992.
 
-It is written in C using the SDL2 library, and was successfully compiled and tested on Linux as well as Windows (MinGW), both 32 and 64 bits.
+It is written in C using the SDL2 library and builds on Linux and Windows
+(MinGW), for both 32- and 64-bit targets. The engine core is also shared
+with an ESP32-S3 port.
+
+Architecture and porting documentation lives in the `docs/` directory:
+
+- `docs/RESMGR.md` — resource manager, retention and streaming decode
+- `docs/GRAPHICS.md` — 4-bit surfaces and panel presentation
+- `docs/MEMTRACK.md` — resident-memory instrumentation
+- `docs/TESTING.md` — frame-equivalence harness and baselines
+- `docs/ESP32.md` — ESP32-S3 port architecture
+
+
+## How to build
+
+The PC build requires SDL2 development headers and a C99 compiler.
+
+```
+    make                # normal build
+    make memtrack       # build with resident-memory instrumentation
+```
+
+The executable is written to the repository root.
 
 
 ## How to install
@@ -10,7 +34,7 @@ It is written in C using the SDL2 library, and was successfully compiled and tes
 For the screen saver to work, you'll need the two data files from the original
 software: `RESOURCE.MAP` and `RESOURCE.001`.
 
-Optionnaly, if you want sounds, you'll need some extra files as well. You can get them [here](https://github.com/nivs1978/Johnny-Castaway-Open-Source/tree/master/JCOS/Resources), from the github repository of the "JCOS" project - another port of the scrantics engine.
+Optionally, if you want sounds, you'll need some extra files as well. You can get them [here](https://github.com/nivs1978/Johnny-Castaway-Open-Source/tree/master/JCOS/Resources), from the github repository of the "JCOS" project - another port of the scrantics engine.
 
 As a result, here is what your directory should look like:
 
@@ -47,30 +71,26 @@ All files must be copied in the same directory as the `jc_reborn` executable.
 
 ## How to run
 
-By default, the engine runs full screen and plays the life of Johnny on his island, as the original did.
+By default, the engine runs full screen and plays the life of Johnny on his
+island, as the original did.
 
-But, if you're curious about how the engine works, you may type `jc_reborn help` and see the different options available. Feel free to try them and explore the inner workings of Screen Antics !
+If you're curious about how the engine works, type `jc_reborn help` to see
+the available options. These include windowed mode, quiet mode, the island
+attract mode, resource dumping, single TTM/ADS playback, benchmarks, memory
+statistics and LRU resource caching.
 
 
 ## Current status
 
-### Short version
-Currently, Johnny reborn is in "work in progress" state. Even so, as of January 2020, every scene works with only some inaccuracies here and there.
+Johnny Reborn is a work in progress. Every scene plays, with some
+inaccuracies in timing and transition details.
 
-That means that the engine globally works in an acceptable way, but more needs to be done to fully understand a number of details and faithfully reproduce the behaviour of the original engine.
-
-### Long version
-
-Some great work was already made by Hans Milling for "Johnny Castaway Open Source" (JCOS), back in 2015. This includes:
-  - the parsing and decoding of all the data files
-  - the understanding of many instructions which constitute TTM and ADS scripts
-
-What Johnny Reborn brings is:
-  - the understanding of nearly every TTM and ADS instruction, and their parameters
-  - the algorithm for Johnny to transitionnaly walk from scene to scene was implemented. Accuracy is not bad though not perfect.
-  - the same can be said about the algorithm which randomly chooses scenes to be played.
-  - as well as the algorithm which draws the island at a random place, clouds, etc.
-  - all the work was made by observing the behaviour of the original software and trying to reproduce it as accurately as possible. For a better result, a complete disassembly of the original exe may be necessary - but wasn't done to this point.
+The engine understands nearly every TTM and ADS instruction and its
+parameters. It implements Johnny's transitional walk between scenes, the
+random scene selection, and the random island placement and cloud rendering.
+The behaviour was derived by observing the original screensaver and
+reproducing it as closely as possible; a complete disassembly of the original
+executable has not been done.
 
 
 ## Thanks
@@ -93,5 +113,3 @@ Hans Milling thanks a number of people for giving him (or helping him find) some
   - Jaap - Helping in finding the format of the resource files
   - Gregori - Assisting with the Lempel-Ziv decompression
   - Guido - The author of the xBaK project that led to understanding the TTM and ADS commands.
-
-

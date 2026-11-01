@@ -28,6 +28,7 @@
 #include "mytypes.h"
 #include "utils.h"
 #include "resource.h"
+#include "resmgr.h"
 #include "dump.h"
 #include "graphics.h"
 #include "events.h"
@@ -36,6 +37,25 @@
 #include "ads.h"
 #include "story.h"
 
+#ifdef __linux__
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+
+// Env-gated segfault diagnostic (see docs/TESTING.md): JC_SEGVDUMP prints a
+// symbolized backtrace on SIGSEGV so rare crashes can be triaged on
+// systems where core dumps are unavailable. Link with -rdynamic for
+// symbol names.
+static void jcSegvHandler(int sig)
+{
+    void *bt[64];
+    int n = backtrace(bt, 64);
+    fprintf(stderr, "JC_SEGVDUMP: fatal signal %d, backtrace:\n", sig);
+    backtrace_symbols_fd(bt, n, STDERR_FILENO);
+    _exit(139);
+}
+#endif
+
 
 static int  argDump     = 0;
 static int  argBench    = 0;
@@ -43,6 +63,8 @@ static int  argTtm      = 0;
 static int  argAds      = 0;
 static int  argPlayAll  = 0;
 static int  argIsland   = 0;
+static int  argLru      = 0;
+static int  argLruBudget= 0;
 
 static char *args[3];
 static int  numArgs  = 0;
@@ -66,6 +88,8 @@ static void usage()
         printf("         island     - display the island as background for ADS play\n");
         printf("         debug      - print some debug info on stdout\n");
         printf("         hotkeys    - enable hot keys\n");
+        printf("         memstats   - print memory resident/peak stats (needs -DMEMTRACK build)\n");
+        printf("         lru[=bytes] - retain recently used resource data in an LRU cache (default budget 1 MiB)\n");
         printf("\n");
         printf(" While-playing hot-keys (if enabled):\n");
         printf("         Esc        - Terminate immediately\n");
@@ -135,6 +159,19 @@ static void parseArgs(int argc, char **argv)
             else if (!strcmp(argv[i], "hotkeys")) {
                 evHotKeysEnabled = 1;
             }
+            else if (!strcmp(argv[i], "memstats")) {
+                memTracking = 1;
+            }
+            else if (!strncmp(argv[i], "lru", 3)) {
+
+                // LRU retention of resource data (see RESMGR.md). Bare
+                // 'lru' selects the default budget, 'lru=<bytes>' an
+                // explicit one.
+                argLru = 1;
+
+                if (argv[i][3] == '=')
+                    argLruBudget = atoi(argv[i] + 4);
+            }
         }
     }
 
@@ -151,18 +188,38 @@ static void parseArgs(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+#ifdef __linux__
+    if (getenv("JC_SEGVDUMP") != NULL)
+        signal(SIGSEGV, jcSegvHandler);
+#endif
+
     parseArgs(argc, argv);
 
     if (argDump)
         debugMode = 1;
 
-    parseResourceFiles("RESOURCE.MAP");
+    // Boot-phase resource indexing. Lazy regime: only the (tiny)
+    // headers of all resources are parsed at boot; the data is loaded
+    // on demand, by resmgrAcquireData() / resmgrAcquireNamed().
+    resmgrInit("RESOURCE.MAP", 0);
+    memTrackCheckpoint("boot");     // peak during resource loading
+
+    // Optional LRU retention behind the acquire/release API. Off by
+    // default: each resource's data is released as soon as its consumer
+    // is done.
+    if (argLru)
+        resmgrSetRetentionPolicy(RESMGR_RETAIN_LRU,
+                                 argLruBudget ? argLruBudget : 1024 * 1024,   // 1 MiB default
+                                 0);
 
     if (argPlayAll) {
         graphicsInit();
         soundInit();
 
         storyPlay();
+
+        memTrackRunReport();        // peak during a whole story
+        resmgrCacheReport();        // cache hit/eviction figures (LRU policy)
 
         soundEnd();
         graphicsEnd();
@@ -184,6 +241,8 @@ int main(int argc, char **argv)
 
         adsPlaySingleTtm(args[0]);
 
+        resmgrCacheReport();        // cache hit/eviction figures (LRU policy)
+
         soundEnd();
         graphicsEnd();
     }
@@ -199,6 +258,8 @@ int main(int argc, char **argv)
             adsNoIsland();
 
         adsPlay(args[0], atoi(args[1]));
+
+        resmgrCacheReport();        // cache hit/eviction figures (LRU policy)
 
         soundEnd();
         graphicsEnd();

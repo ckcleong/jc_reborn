@@ -80,9 +80,8 @@ static void calcPathRecurse(int prevNode, int curNode)
 
 int *calcPath(int fromNode, int toNode)
 {
-    // Note: this is certainly not the exact algorithm used in the original,
-    // but so far it is the best I could imagine to fit the need.
-
+    // Enumerate every simple path between the two nodes, then pick one at
+    // random.
     int *res;
 
     for (int i=0; i < NUM_OF_NODES; i++) {

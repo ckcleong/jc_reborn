@@ -21,9 +21,23 @@
  *
  */
 
-//------------------------
+#include <stdio.h>
+#include <stdlib.h>
+
+ //------------------------
 //    Types definitions
 //------------------------
+
+// Resource type ids, used by the resource manager's index and by the
+// resParseHeader()/resLoadData() dispatchers.
+
+#define RES_TYPE_ADS      0
+#define RES_TYPE_BMP      1
+#define RES_TYPE_PAL      2
+#define RES_TYPE_SCR      3
+#define RES_TYPE_TTM      4
+#define RES_TYPE_VIN      5
+#define RES_TYPE_UNKNOWN  6
 
 struct TMapFile {
     uint8 unknown1;
@@ -55,8 +69,8 @@ struct TAdsResource {
     uint8 adsUnknown3;
     uint8 adsUnknown4;
     uint32 resSize;
-    uint16 numRes;  // TODO rename
-    struct TAdsRes *res;  // TODO rename
+    uint16 numRes;
+    struct TAdsRes *res;
     uint32 compressedSize;
     uint8 compressionMethod;
     uint32 uncompressedSize;
@@ -79,7 +93,7 @@ struct TBmpResource {
     uint16 height;
     uint32 dataSize;
     uint16 numImages;
-    uint16 *widths;   // TODO
+    uint16 *widths;
     uint16 *heights;
     uint32 compressedSize;
     uint8 compressionMethod;
@@ -135,7 +149,7 @@ struct TTtmResource {
     uint8 ttiUnknown4;
     uint32 tagSize;
     uint16 numTags;
-    struct TTags *tags; // TODO : merge with ttmTags from ttm.c ?
+    struct TTags *tags;
 };
 
 
@@ -165,9 +179,30 @@ extern int numTtmResources;
 //    Functions prototypes
 //----------------------------
 
-void parseResourceFiles(char *);
-struct TAdsResource *findAdsResource(char *searchString);
-struct TBmpResource *findBmpResource(char *searchString);
-struct TScrResource *findScrResource(char *searchString);
-struct TTtmResource *findTtmResource(char *searchString);
+// Used by resmgr.c, which owns the boot-time orchestration:
+//
+//   - resParseHeader() parses all the header fields of one resource (in
+//     the file type given as argument) and returns a pointer to its
+//     freshly typed struct. The compressed blob is NOT read nor
+//     decompressed: it is skipped over, and its absolute file offset is
+//     returned in *blobOffset for a later resLoadData() call.
+//
+//   - resLoadData() loads and decompresses the data of an existing, fully
+//     parsed resource.
+//
+//   - resDataSizes() returns the compressed / uncompressed sizes of a
+//     resource struct.
+//
+//   - resReleaseUncompressed() frees the uncompressed data of a resource
+//     (pointer kept constant - resName etc. - only the data is released).
+
+void  *resParseHeader(FILE *f, int resType, uint32 *blobOffset);
+void   resLoadData(FILE *f, int resType, void *resource, uint32 blobOffset);
+void   resDataSizes(void *resource, int resType, size_t *compressed, size_t *uncompressed);
+void   resReleaseUncompressed(void *resource, int resType);
+
+struct TAdsResource *findAdsResource(char *);
+struct TBmpResource *findBmpResource(char *);
+struct TScrResource *findScrResource(char *);
+struct TTtmResource *findTtmResource(char *);
 

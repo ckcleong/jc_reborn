@@ -74,9 +74,17 @@ static uint16 getBits(FILE *f, uint32 n)
 }
 
 
-uint8 *uncompressLZW(FILE *f, uint32 inSize, uint32 outSize)
+//---------------
+//    Decompressors. Two forms per algorithm:
+//    - uncompressXxx Dest() writes into a caller-provided buffer (the
+//      streaming form: the caller owns the destination, e.g. the pixel
+//      buffer of the surface being decoded straight into).
+//    - uncompressXxx() allocates the buffer and returns it.
+//    Both share the byte-exact decode logic below.
+//---------------
+
+static void uncompressLZWDest(FILE *f, uint32 inSize, uint32 outSize, uint8 *outData)
 {
-    uint8  *outData;
     struct TCodeTableEntry codeTable[4096];
     uint8  decodeStack[4096];
     uint32 stackPtr = 0;
@@ -94,7 +102,6 @@ uint8 *uncompressLZW(FILE *f, uint32 inSize, uint32 outSize)
     maxInOffset = inSize;
     nextbit     = 0;
     inOffset    = 0;
-    outData     = safe_malloc(outSize * sizeof(uint8));
 
     current  = (uint8) getByte(f);
     lastbyte = oldcode = getBits(f, n_bits);
@@ -148,7 +155,7 @@ uint8 *uncompressLZW(FILE *f, uint32 inSize, uint32 outSize)
                 stackPtr--;
 
                 if (outOffset >= outSize)
-                    return outData;
+                    return;
 
                 outData[outOffset++] = decodeStack[stackPtr];
             }
@@ -172,20 +179,30 @@ uint8 *uncompressLZW(FILE *f, uint32 inSize, uint32 outSize)
 
     if (inOffset != inSize)
         fatalError("error while uncompressing LZW");
+}
+
+
+uint8 *uncompressLZW(FILE *f, uint32 inSize, uint32 outSize)
+{
+    uint8 *outData;
+
+    if (outSize == 0)
+        fatalError("uncompressLZW() : can't uncompress to 0 bytes\n");
+
+    outData = safe_malloc(outSize * sizeof(uint8));
+
+    uncompressLZWDest(f, inSize, outSize, outData);
 
     return outData;
 }
 
 
-uint8 *uncompressRLE(FILE *f, uint32 inSize, uint32 outSize)
+static void uncompressRLEDest(FILE *f, uint32 inSize, uint32 outSize, uint8 *outData)
 {
-    uint8 *outData;
     uint32 outOffset = 0;
 
     inOffset    = 0;
     maxInOffset = inSize;
-
-    outData = safe_malloc(outSize * sizeof(uint8));
 
     while (outOffset < outSize) {
 
@@ -210,6 +227,14 @@ uint8 *uncompressRLE(FILE *f, uint32 inSize, uint32 outSize)
 
     if (inOffset != inSize)
         fatalError("error while uncompressing RLE");
+}
+
+
+uint8 *uncompressRLE(FILE *f, uint32 inSize, uint32 outSize)
+{
+    uint8 *outData = safe_malloc(outSize * sizeof(uint8));
+
+    uncompressRLEDest(f, inSize, outSize, outData);
 
     return outData;
 }
@@ -229,6 +254,27 @@ uint8 *uncompress(FILE *f, uint8 compressionMethod, uint32 inSize, uint32 outSiz
 
         default:
             return NULL;
+            break;
+    }
+}
+
+
+void uncompressIntoBuf(FILE *f, uint8 compressionMethod, uint32 inSize,
+                       uint32 outSize, uint8 *outData)
+{
+    switch (compressionMethod) {
+
+        case 1:
+            uncompressRLEDest(f, inSize, outSize, outData);
+            break;
+
+        case 2:
+            uncompressLZWDest(f, inSize, outSize, outData);
+            break;
+
+        default:
+            fatalError("uncompressIntoBuf(): unknown compression method %u",
+                   compressionMethod);
             break;
     }
 }

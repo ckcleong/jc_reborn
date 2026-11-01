@@ -63,7 +63,7 @@ static void eventsProcessEvents()
                         case SDLK_RETURN:
                             if (event.key.keysym.mod & KMOD_LALT) {
                                 grToggleFullScreen();
-                                oneFrame = 1;   // to redraw the window // TODO
+                                oneFrame = 1;   // redraw the window
                             }
                             else {
                                 oneFrame = 1;

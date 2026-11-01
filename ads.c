@@ -24,11 +24,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <SDL2/SDL.h>
 
 #include "mytypes.h"
 #include "utils.h"
 #include "resource.h"
+#include "resmgr.h"
 #include "graphics.h"
 #include "ttm.h"
 #include "island.h"
@@ -192,7 +192,7 @@ static void adsLoad(uint8 *data, uint32 dataSize, uint16 numTags, uint16 tag, ui
 
 static void adsReleaseAds()
 {
-    free(adsTags);
+    safe_free(adsTags);
 }
 
 
@@ -405,7 +405,7 @@ static void adsRandomEnd()
 }
 
 
-void adsInit()    // Init slots and threads for TTM scripts  // TODO : rename
+void adsInit()    // Init slots and threads for TTM scripts
 {
     for (int i=0; i < MAX_TTM_SLOTS; i++)
         ttmInitSlot(&ttmSlots[i]);
@@ -610,7 +610,7 @@ static void adsPlayChunk(uint8 *data, uint32 dataSize, uint32 offset)
             case 0xffff:
                 debugMsg("END");
 
-                if (inSkipBlock)     // TODO - no doubt this is q&d
+                if (inSkipBlock)     // END inside a skipped IF block
                     inSkipBlock = 0;
                 else
                     adsStopRequested = 1;
@@ -661,7 +661,25 @@ void adsPlay(char *adsName, uint16 adsTag)
     uint8  *data;
     uint32 dataSize;
 
-    struct TAdsResource *adsResource = findAdsResource(adsName);
+    // Sound harness correlation (see sound.c JC_SNDTRACE): the scene
+    // timeline needs the name/entry-time of every adsPlay call.
+    if (getenv("JC_SNDTRACE") != NULL)
+        fprintf(stderr, "SCENE t=%6lums name=%s tag=%u\n",
+                (unsigned long) grTicks(), adsName, adsTag);
+
+    // Scene-level memory baseline: everything allocated from here to the
+    // matching "scene end" report (background sprites, layers, etc.)
+    // is transient per-scene memory.
+    memTrackCheckpoint("scene start");
+
+    // The ADS script data has to stay resident for the whole scene: it
+    // is released just before the "scene end" report below.
+    struct TResIndexEntry *adsIdxEntry = resmgrAcquireNamed(adsName);
+
+    if (adsIdxEntry == NULL)
+        fatalError("ADS resource %s not found.", adsName);
+
+    struct TAdsResource *adsResource = (struct TAdsResource *) adsIdxEntry->resource;
 
     debugMsg("\n\n========== Playing ADS: %s:%d ==========\n", adsResource->resName, adsTag);
 
@@ -798,9 +816,14 @@ void adsPlay(char *adsName, uint16 adsTag)
     for (int i=0; i < MAX_TTM_SLOTS; i++)
         ttmResetSlot(&ttmSlots[i]);
 
+    // Release the ADS script data
+    resmgrReleaseData(adsIdxEntry);
+
     grRestoreZone(NULL, 0, 0, 0, 0);
 
     adsReleaseAds();
+
+    memTrackReport("scene end");
 }
 
 
@@ -829,10 +852,22 @@ void adsPlayBench()  // TODO - tempo
         for (int i=0; i < MAX_TTM_THREADS; i++)
             ttmThreads[i].isRunning = (i<numLayers ? 1 : 0);
 
-        startTicks = SDL_GetTicks();
+        if (getenv("JC_BENCHFIX") != NULL) {
+            // Determinism harness: bound each phase by a fixed frame
+            // count instead of wall-clock time, so that slow builds
+            // produce the exact same frame sequence
+            for (counter=0; counter < 500; counter++) {
+                for (int i=0; i < numLayers; i++)
+                    benchPlay(&ttmThreads[i], i);
+                grUpdateDisplay(NULL, ttmThreads, NULL);
+            }
+            continue;
+        }
+
+        startTicks = grTicks();
         counter = 0;
 
-        while ((SDL_GetTicks() - startTicks) <= 3000) {
+        while ((grTicks() - startTicks) <= 3000) {
 
             for (int i=0; i < numLayers; i++)
                 benchPlay(&ttmThreads[i], i);
@@ -842,7 +877,7 @@ void adsPlayBench()  // TODO - tempo
             counter++;
         }
 
-        printf(" %d-layers test --> %d fps\n", numLayers, counter/3);
+        printf(" %d-layers test --> %lu fps\n", numLayers, (unsigned long) (counter/3));
     }
 
     for (int i=0; i < 8; i++)
@@ -911,6 +946,11 @@ void adsNoIsland()
 
 void adsPlayWalk(int fromSpot, int fromHdg, int toSpot, int toHdg)
 {
+    // Sound harness correlation (see adsPlay()).
+    if (getenv("JC_SNDTRACE") != NULL)
+        fprintf(stderr, "WALK  t=%6lums %d->%d\n",
+                (unsigned long) grTicks(), fromSpot, toSpot);
+
     adsAddScene(0,0,0);
     grLoadBmp(ttmSlots, 0, "JOHNWALK.BMP");
 

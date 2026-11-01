@@ -1,0 +1,59 @@
+# jc_reborn — ESP32-S3 defaults (docs/ESP32.md).
+# Board class: ESP32-S3, 8 MB PSRAM (octal, e.g. N16R8 WROVER-style
+# module), 16 MB flash.
+
+# --- CPU / toolchain -------------------------------------------------
+# The target is set via IDF_TARGET in CMakeLists.txt and stored in
+# sdkconfig as CONFIG_IDF_TARGET_ESP32S3; it is not a defaults symbol.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# --- Flash ----------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# 16 MB flash addressing (files > 1 MB live in the resources partition)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# Custom layout (esp32/partitions.csv): 3 MB factory app (the replay-
+# frames embed alone is ~1.2 MB) + 8 MB FATFS for the resource files.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- PSRAM ----------------------------------------------------------
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+# 80 MHz octal PSRAM: IDF v6.1 rejects the 120 MHz MSPI timing
+# combination (240 MHz core + 80 MHz flash table missing), and
+# Espressif marks 120M octal temperature-sensitive.
+CONFIG_SPIRAM_SPEED_80M=y
+
+# grPanel (230 400 B static in graphics.c) must live in PSRAM: static
+# arrays are not affected by SPIRAM_USE_MALLOC routing, so the external-
+# RAM BSS section is enabled and the array is marked EXT_RAM_BSS_ATTR.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# Memory routing: big engine allocations land in PSRAM; internal SRAM is
+# reserved for stacks, SPI/I2S DMA buffers and FILE buffers.
+CONFIG_SPIRAM_USE_MALLOC=y
+# The engine's resident set (~460 KB through the story) is mostly small
+# allocations (resource headers, tags, image sub-blocks). Keeping those
+# in internal SRAM fragments it into crumbs (measured on device:
+# internal largest-block 31744 -> 320 -> 112 with 65 KB still free, then
+# the first FreeRTOS mutex allocation from the fseek path aborts with
+# "No more semaphores available or OOM"). Everything above ~1 KB belongs
+# in PSRAM; internal keeps stdio/VFS/stack traffic.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
+# --- FreeRTOS / pacing ----------------------------------------------
+# The PC build paces frames with SDL_Delay(5)-granular waits (events.c).
+# 1 kHz ticks reproduce that resolution for the story baseline run.
+CONFIG_FREERTOS_HZ=1000
+
+# --- FATFS (RESOURCE.001 / RESOURCE.MAP / WAVs) -----------------------
+CONFIG_FATFS_LFN_STACK=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# --- Display ---------------------------------------------------------
+# esp_lcd needs no kconfig switch; the main component lists it in
+# PRIV_REQUIRES/REQUIRES and the CMake build pulls it in.

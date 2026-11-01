@@ -41,7 +41,8 @@ void islandInit(struct TTtmThread *ttmThread)
         grLoadScreen("NIGHT.SCR");
     }
     else {
-        char scrName[12];
+        char scrName[16];   // worst case "OCEAN00.SCR" = 12 incl. NUL; margin
+                            // retained so a future format change can't overflow
         sprintf(scrName, "OCEAN0%d.SCR", rand() % 3);
         grLoadScreen(scrName);
     }
@@ -75,7 +76,9 @@ void islandInit(struct TTtmThread *ttmThread)
 
     int windDirection = rand() % 2;
     int numClouds;
-    uint16 cloudX, cloudY;
+    uint16 cloudX = 0, cloudY = 0;  // initialized: the switch below assigns
+                                    // both for every reachable case (0..2); the
+                                    // init exists so the compiler sees it too
 
     grDx = grDy = 0;
 

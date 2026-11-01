@@ -1,5 +1,4 @@
 .gitignore
-Makefile
 jc_reborn
 jc_reborn.exe
 *.o
@@ -7,3 +6,15 @@ RESOURCE.MAP
 RESOURCE.001
 *.wav
 dump/
+_baseline/
+
+# ESP32 IDF local state (esp32r/ build output, generated sdkconfig,
+# flash args); the checked-in sources are esp32/*.csv, esp32/CMakeLists.txt,
+# esp32/sdkconfig.defaults, esp32/components/, esp32/main/ (minus
+# generated headers)
+esp32/build/
+esp32/sdkconfig
+esp32/sdkconfig.old
+esp32/dependencies.lock
+esp32/main/replay_frames.h
+

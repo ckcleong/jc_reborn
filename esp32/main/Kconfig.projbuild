@@ -1,0 +1,11 @@
+menu "JC setup mode"
+
+    config JC_SETUP_AP_SSID
+        string "Setup-mode access point name"
+        default "JohnnyCastaway-Setup"
+        help
+            The softAP shown as a WIFI-join QR code on the panel when
+            the device has no valid clock (or the boot button is held
+            ~5 s). Open network, captive portal at http://192.168.4.1/.
+
+endmenu
