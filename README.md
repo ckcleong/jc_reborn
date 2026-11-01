@@ -11,6 +11,7 @@ with an ESP32-S3 port.
 Architecture and porting documentation lives in the `docs/` directory:
 
 - `docs/RESMGR.md` — resource manager, retention and streaming decode
+- `docs/STORY.md` — story-day cycle, scenes, clock and persistent state
 - `docs/GRAPHICS.md` — 4-bit surfaces and panel presentation
 - `docs/MEMTRACK.md` — resident-memory instrumentation
 - `docs/TESTING.md` — frame-equivalence harness and baselines

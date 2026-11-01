@@ -172,7 +172,8 @@ a self-hosted portal and persisted in NVS.
   power cut costs at most ~10 minutes plus the power-off gap.
 
 Story-day state (`currentDay`, `date`) is stored in NVS as well, so story
-progression survives reboots independently of the clock snapshot.
+progression survives reboots independently of the clock snapshot. See
+`STORY.md` for the day cycle, scene selection and persistence rules.
 
 `main/qr.c` is a minimal byte-mode QR encoder (versions 1–4, ECC level L,
 ISO/IEC 18004 mask selection). `main/setup.c` implements the softAP, DNS,
