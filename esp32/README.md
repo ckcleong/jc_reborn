@@ -63,7 +63,7 @@ image separately.
 
 ## Resource image
 
-The engine expects `RESOURCE.MAP`, `RESOURCE.001`, the WAV set and a pinned
+The engine expects `RESOURCE.MAP`, `RESOURCE.001`, the WAV set and a seed
 story-state file in a FAT partition mounted at `/resources`. Build the image
 from the PC resource directory:
 
@@ -80,9 +80,10 @@ python -m esptool --chip esp32s3 -p /dev/ttyACM0 --baud 921600 \
     write-flash 0x310000 /tmp/resources_ro.img
 ```
 
-The partition is mounted read-only (plain FAT, no wear levelling). The story's
-day-state write fails with a one-line warning, the same behaviour as an
-unwritable `$HOME` on PC.
+The partition is mounted read-only (plain FAT, no wear levelling). It supplies
+resources only; `.jc_reborn` seeds the story-day state on first boot, after
+which the engine keeps that state in NVS. Story progression therefore survives
+reboots without a writable resource partition.
 
 ## Console
 
@@ -161,6 +162,9 @@ Espressif captive-portal example.
 ## Diagnostics
 
 - The boot log prints internal/PSRAM free and largest-block sizes.
+- At story start the log shows the NVS `currentDay`/`date`, the effective
+  clock and the sound preference. NVS story-state updates and each ADS scene
+  (name, tag, flags) are logged as they happen.
 - A colour-bar test pattern and a full-panel push-fps probe run at boot.
 - A heap trajectory (internal, PSRAM, story task stack high-water mark) is
   printed every 5 seconds.

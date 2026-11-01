@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>     // setenv
+#include <time.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -41,6 +42,7 @@
 #include <esp_vfs_fat.h>
 
 #include "mytypes.h"
+#include "config.h"     // cfgFileRead, TConfig
 #include "graphics.h"   // GR_FRAME_W/GR_FRAME_H, graphicsInit/End
 #include "utils.h"      // memTracking, memTrackCheckpoint/RunReport
 #include "resmgr.h"     // resmgrInit, resmgrCacheReport
@@ -51,6 +53,35 @@
 #include "platform.h"
 
 static const char *TAG = "jc_reborn";
+
+// Startup diagnostics: the persisted story state, the effective clock and
+// the audio preference.
+static void log_startup_state(void)
+{
+    struct TConfig cfg;
+    cfgFileRead(&cfg);
+
+    ESP_LOGI(TAG, "story state (NVS): currentDay=%d date=%d",
+             cfg.currentDay, cfg.date);
+
+    if (setup_clock_valid()) {
+        time_t now = time(NULL);
+        struct tm *tmNow = localtime(&now);
+        char clock[32];
+
+        if (tmNow != NULL
+            && strftime(clock, sizeof(clock), "%Y-%m-%d %H:%M:%S", tmNow) > 0)
+            ESP_LOGI(TAG, "clock: %s (epoch %lld)", clock, (long long) now);
+        else
+            ESP_LOGI(TAG, "clock: epoch %lld", (long long) now);
+    }
+    else {
+        ESP_LOGI(TAG, "clock: baseline pin %s %02d:00 (day-of-year %d)",
+                 getMonthAndDay(), getHour(), getDayOfYear());
+    }
+
+    ESP_LOGI(TAG, "sound: %s", setup_sound_enabled() ? "enabled" : "disabled");
+}
 
 // Optional pipeline measurement: run the `bench` compose-fps test
 // (1/4/8 ttm layers, 3 s wall-clock windows) before the story, then
@@ -157,18 +188,16 @@ static void pattern_show(void)
 
 // Mount the 'resources' FATFS partition (flash 0x310000; image built
 // with the IDF fatfsgen from out/: RESOURCE.001 + RESOURCE.MAP + WAVs
-// + the pinned story state .jc_reborn) READ-ONLY. The resource set is
+// + the seed story state .jc_reborn) READ-ONLY. The resource set is
 // read-only data, so a plain FAT ro mount (no wear levelling, no
-// writes) is the durable design. The story's day-state write
-// (config.c cfgFileWrite) then fails with a one-line warning — the
-// same tolerated behaviour as an unwritable $HOME on PC.
+// writes) is the durable design.
 //   - the engine opens the resource files by bare name ("RESOURCE.MAP",
 //     resmgr.c) — the PC runner chdirs into out/; on device (IDF VFS
 //     has no chdir) utils.c safe_fopen() prefixes them with the mount
 //     point,
-//   - config.c derives its config path from $HOME — pinned to the
-//     mount (the image ships the runner's pinned state: currentDay=5,
-//     date=292),
+//   - config.c seeds its NVS-backed story state from the .jc_reborn
+//     file in the image (currentDay=5, date=292) on first boot, then
+//     reads and writes NVS; $HOME is pinned to the mount to find it,
 //   - JC_TESTTIME=102014 pins the calendar exactly as on PC (utils.c).
 static int story_mount_resources(void)
 {
@@ -247,6 +276,8 @@ static void story_task(void *arg)
     // tuning knob (jc_reborn.c 'lru[=bytes]') and is not enabled here.
     resmgrInit("RESOURCE.MAP", 0);
     memTrackCheckpoint("boot");     // peak during resource loading
+
+    log_startup_state();
 
     graphicsInit();
 

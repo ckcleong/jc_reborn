@@ -86,9 +86,9 @@ unchanged.
 - `RESOURCE.MAP`, `RESOURCE.001` and the WAV set are packed into a FAT image
   and flashed separately from the application.
 - The image also ships `.jc_reborn` with `currentDay=5` and `date=292`.
-- `$HOME` is set to `/resources`, so `config.c` reads and writes the story
-  state there. Because the mount is read-only, the day-state write fails with
-  a tolerated warning.
+  On ESP32 this file is only a first-boot seed: `config.c` stores the story
+  day state in NVS and reads it from there on subsequent runs.
+- `$HOME` is set to `/resources` so `config.c` can find that seed file.
 - If no valid clock is stored, `JC_TESTTIME=102014` pins the calendar to the
   same reference moment the PC test runner uses.
 
@@ -103,9 +103,9 @@ The partition layout is:
 | `resources` | data/fat | 0x310000 | 8 MB |
 
 The resource partition is plain FAT mounted read-only, not wear-levelled:
-the engine only reads resources, so mounting it without writes or wear
-levelling keeps the image durable. The story's day-state write then fails with
-a warning, matching an unwritable `$HOME` on PC.
+the engine only reads resources from it. Story day state is persisted in NVS
+instead, so no writable filesystem is needed and the resource image stays
+durable.
 
 ## Memory routing
 
@@ -171,6 +171,9 @@ a self-hosted portal and persisted in NVS.
 - During playback the clock is snapshotted to NVS every ~10 minutes, so a
   power cut costs at most ~10 minutes plus the power-off gap.
 
+Story-day state (`currentDay`, `date`) is stored in NVS as well, so story
+progression survives reboots independently of the clock snapshot.
+
 `main/qr.c` is a minimal byte-mode QR encoder (versions 1–4, ECC level L,
 ISO/IEC 18004 mask selection). `main/setup.c` implements the softAP, DNS,
 HTTP server and setup screen. The `dns_server` component is the Espressif
@@ -197,6 +200,9 @@ If the resource mount fails, the device falls back to the replay loop when
 
 - A heap trajectory is printed every 5 seconds: internal and PSRAM free/largest
   blocks and the story task stack high-water mark.
+- At story start the log shows the NVS `currentDay`/`date`, the effective
+  clock and the sound preference. NVS story-state updates and each ADS scene
+  (name, tag, flags) are logged as they happen.
 - The boot push-fps probe measures the full-panel blocking SPI push rate.
 - `JC_BENCH_AT_BOOT` runs the compose benchmark instead of the story.
 - `JC_STORY_DEADLINE_S` ends the story after N seconds, prints the closing

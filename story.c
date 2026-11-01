@@ -24,6 +24,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __xtensa__
+#include <esp_log.h>
+#endif
+
 #include "mytypes.h"
 #include "utils.h"
 #include "graphics.h"
@@ -37,6 +41,10 @@
 
 
 static int storyCurrentDay = 1;
+
+#ifdef __xtensa__
+static const char *TAG = "jc_story";
+#endif
 
 
 static struct TStoryScene *storyPickScene(
@@ -244,6 +252,12 @@ void storyPlay()
                 if (scene->dayNo)
                     soundPlay(0);
 
+#ifdef __xtensa__
+                ESP_LOGI(TAG, "scene: %s tag=%d flags=0x%02x",
+                         scene->adsName, scene->adsTagNo,
+                         (unsigned) scene->flags);
+#endif
+
                 adsPlay(scene->adsName, scene->adsTagNo);
 
                 unwantedFlags |= FIRST;
@@ -265,6 +279,12 @@ void storyPlay()
 
         if (finalScene->dayNo)
             soundPlay(0);
+
+#ifdef __xtensa__
+        ESP_LOGI(TAG, "final scene: %s tag=%d flags=0x%02x",
+                 finalScene->adsName, finalScene->adsTagNo,
+                 (unsigned) finalScene->flags);
+#endif
 
         adsPlay(finalScene->adsName, finalScene->adsTagNo);
 

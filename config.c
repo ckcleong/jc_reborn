@@ -25,11 +25,25 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef __xtensa__
+#include <esp_err.h>
+#include <esp_log.h>
+#include <nvs.h>
+#endif
+
 #include "mytypes.h"
 #include "utils.h"
 #include "config.h"
 
 #define BUFFER_LEN 100
+
+#ifdef __xtensa__
+#define CFG_NVS_NAMESPACE   "jc"
+#define CFG_NVS_CURRENT_DAY "story_day"
+#define CFG_NVS_DATE        "story_date"
+
+static const char *TAG = "jc_cfg";
+#endif
 
 
 static char *cfgFullPath()
@@ -61,8 +75,67 @@ static char *cfgFullPath()
 }
 
 
+#ifdef __xtensa__
+static int cfgNvsRead(struct TConfig *cfg)
+{
+    nvs_handle_t h;
+    int32_t currentDay, date;
+    esp_err_t err;
+
+    err = nvs_open(CFG_NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK)
+        return 0;
+
+    err = nvs_get_i32(h, CFG_NVS_CURRENT_DAY, &currentDay);
+    if (err == ESP_OK)
+        err = nvs_get_i32(h, CFG_NVS_DATE, &date);
+
+    nvs_close(h);
+
+    if (err != ESP_OK)
+        return 0;
+
+    cfg->currentDay = currentDay;
+    cfg->date       = date;
+    return 1;
+}
+
+
+static void cfgNvsWrite(const struct TConfig *cfg)
+{
+    nvs_handle_t h;
+    esp_err_t err;
+
+    err = nvs_open(CFG_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "couldn't open NVS for story state (%s)",
+                 esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_set_i32(h, CFG_NVS_CURRENT_DAY, cfg->currentDay);
+    if (err == ESP_OK)
+        err = nvs_set_i32(h, CFG_NVS_DATE, cfg->date);
+    if (err == ESP_OK)
+        err = nvs_commit(h);
+
+    nvs_close(h);
+
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "story state updated in NVS: currentDay=%d date=%d",
+                 cfg->currentDay, cfg->date);
+    else
+        ESP_LOGW(TAG, "couldn't store story state in NVS (%s)",
+                 esp_err_to_name(err));
+}
+#endif
+
+
 void cfgFileWrite(struct TConfig *cfg)
 {
+#ifdef __xtensa__
+    cfgNvsWrite(cfg);
+#else
     FILE *f = fopen(cfgFullPath(), "w");
 
     if (f == NULL) {
@@ -73,6 +146,7 @@ void cfgFileWrite(struct TConfig *cfg)
         fprintf(f, "date=%d\n", cfg->date);
         fclose(f);
     }
+#endif
 }
 
 
@@ -82,6 +156,13 @@ void cfgFileRead(struct TConfig *cfg)
 
     cfg->currentDay = 0;
     cfg->date       = 0;
+
+#ifdef __xtensa__
+    // Story state is persistent in NVS. The .jc_reborn file in the
+    // read-only resource image is only a first-boot seed.
+    if (cfgNvsRead(cfg))
+        return;
+#endif
 
     FILE *f = fopen(cfgFullPath(), "r");
 
@@ -99,6 +180,10 @@ void cfgFileRead(struct TConfig *cfg)
         }
 
         fclose(f);
+
+#ifdef __xtensa__
+        cfgNvsWrite(cfg);
+#endif
     }
 }
 

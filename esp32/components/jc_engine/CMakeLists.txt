@@ -28,6 +28,7 @@ idf_component_register(
     INCLUDE_DIRS ${JC_ROOT}
 
     REQUIRES esp_timer
+    PRIV_REQUIRES nvs_flash log
 )
 
 # PC-only SDL glue, excluded from the engine component (it is replaced
@@ -40,12 +41,13 @@ idf_component_register(
 #   jc_reborn.c   — PC argv entry point (esp32/main/main.c is the ESP32
 #                   entry point)
 
-# The engine is C99 like the PC build (root Makefile: -std=c99). -O2
-# comes from CONFIG_COMPILER_OPTIMIZATION_PERF (sdkconfig.defaults).
+# The engine sources are C99-compatible. IDF v6 headers require C11 or
+# newer for static_assert, so the component builds as gnu17. -O2 comes
+# from CONFIG_COMPILER_OPTIMIZATION_PERF (sdkconfig.defaults).
 # -DMEMTRACK matches the PC memstats build (make memtrack); the [MEM]
 # resident/peak checkpoints are the device-vs-PC comparison target.
 target_compile_options(${COMPONENT_LIB} PRIVATE
-    -std=gnu99
+    -std=gnu17
     -Wall
     -DMEMTRACK
 )
